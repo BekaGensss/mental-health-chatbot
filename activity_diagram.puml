@@ -1,0 +1,45 @@
+@startuml
+start
+
+partition Murid (Frontend) {
+    :Akses /;
+    :Klik Icon Chatbot;
+    :Isi Nama dan Kelas;
+    :Input Diterima via JS;
+    :Ketik 'MULAI FORM';
+    :AJAX Kirim Pesan ke Backend;
+}
+
+partition Backend (PHP Controller) {
+    :ChatbotController@interact(msg);
+    if (Detect 'MULAI FORM') then (Ya)
+        :Kirim Sinyal 'START_SCORING_FORM' ke JS;
+    else (Tidak)
+        :Kirim Pesan Empati (AI Gemini);
+        stop
+    endif
+    
+    :Redirect ke /scoring-form;
+    :PublicController@submitForm(Data);
+    :Hitung 4 Skala (PHQ9, GAD7, KPK, DASS21);
+    :Simpan data ke StudentData DB;
+    :Redirect ke /success?ID=...;
+}
+
+partition Murid (Frontend) {
+    :Tampilkan Halaman Skoring Statis;
+    :Isi 25 Pertanyaan;
+    :Klik 'Lihat Hasil Analisis';
+    :Tampilkan Halaman Sukses (Visualisasi Skor);
+    :Opsi: Download Laporan PDF;
+}
+
+partition Admin (Live) {
+    :Admin Log In;
+    :Akses Laporan /admin/data-murid;
+    :Sistem memproses DB;
+    :Tampilkan Diagram dan Analisis Risiko;
+}
+
+stop
+@enduml
