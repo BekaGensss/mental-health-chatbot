@@ -11,7 +11,7 @@ class ChatbotController extends Controller
     public function interact(Request $request)
     {
         // Mendapatkan API Key
-        $apiKey = env('GEMINI_API_KEY', 'AIzaSyBR3gTATHpNLNZnR0hOt3K5Xb00_aQsLWM');
+        $apiKey = env('GEMINI_API_KEY', 'AIzaSyDCfxMi6hi8AxgeIQ0AzVcmVimkW4AFDNk');
 
         $message = $request->input('message');
         $lowerMessage = strtolower($message); 

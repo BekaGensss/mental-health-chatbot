@@ -9,7 +9,21 @@
     <link rel="shortcut icon" href="{{ asset('images/mts.jpg') }}" type="image/jpeg">
     
     {{-- MUAT ASSET KOMPILASI VIA VITE UNTUK PRODUCTION STABILITY --}}
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+     @php
+    $isProduction = app()->environment('production');
+    $manifestPath = $isProduction ? '../public_html/build/manifest.json' : public_path('build/manifest.json');
+ @endphp
+ 
+  @if ($isProduction && file_exists($manifestPath))
+   @php
+    $manifest = json_decode(file_get_contents($manifestPath), true);
+   @endphp
+    <link rel="stylesheet" href="{{ config('app.url') }}/build/{{ $manifest['resources/css/app.css']['file'] }}">
+    <script type="module" src="{{ config('app.url') }}/build/{{ $manifest['resources/js/app.js']['file'] }}"></script>
+  @else
+    @viteReactRefresh
+    @vite(['resources/js/app.js', 'resources/css/app.css'])
+  @endif
     
     <meta name="csrf-token" content="{{ csrf_token() }}"> 
     
@@ -91,60 +105,65 @@
         #data-diri-fields select option { color: #1f2937; background-color: white; }
         
         /* ================================================= */
-        /* II. NOTIFIKASI & ANIMASI (RESPONSIVE) */
+        /* II. FLOATING BUTTONS & RESPONSIVE POSITIONING */
         /* ================================================= */
         
-        /* A. Container Tombol Utama (Responsive positioning) */
+        /* A. Container Tombol KANAN BAWAH (Hanya Chatbot) */
         .chatbot-button-container {
             position: fixed;
             bottom: 24px; 
             right: 24px; 
             z-index: 50;
             display: flex;
-            flex-direction: row; 
+            /* Di sini hanya ada satu tombol, biarkan flex-direction row/column tidak terlalu penting */
+            flex-direction: column; 
             align-items: flex-end;
             gap: 12px; 
             transition: all 0.3s ease;
         }
 
-        /* B. Awan Pesan Horizontal (Speech Bubble) - POSISI EFEKTIF */
-        #chat-attention-bubble {
-            display: none; /* Menyembunyikan elemen bubble sepenuhnya */
-            /* Properti Asli yang dipertahankan sebagai referensi */
-            position: absolute;
-            top: 50%; 
-            right: 90px; 
-            transform: translateY(-50%); 
-            background-color: #ffffff;
-            color: #4f46e5;
-            padding: 8px 12px;
-            border-radius: 12px; 
+        /* B. Container Tombol KIRI BAWAH (About/Info) */
+        .about-fixed-container {
+            position: fixed;
+            bottom: 24px;
+            left: 24px;
+            z-index: 50;
+        }
+
+        .about-button-left-side {
+            background-color: #10b981; /* Green 500 */
+            color: white;
+            padding: 10px 15px;
+            border-radius: 9999px;
             font-weight: bold;
-            font-size: 0.9rem;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-            opacity: 1; 
-            visibility: hidden; /* Ganti visible menjadi hidden */
+            font-size: 0.85rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center; /* Pusat ikon saat teks hilang */
+            gap: 8px;
+            cursor: pointer;
             transition: all 0.3s ease;
-            z-index: 5;
-            white-space: nowrap; 
+            white-space: nowrap;
         }
         
-        /* Ekor Bubble */
-        #chat-attention-bubble::after {
-            display: none; /* Menyembunyikan ekornya (panah putih) */
-            /* Properti Asli yang dipertahankan sebagai referensi */
-            content: '';
-            position: absolute;
-            top: 50%; 
-            right: -8px; 
-            transform: translateY(-50%);
-            width: 0;
-            height: 0;
-            border-style: solid;
-            border-width: 8px 0 8px 8px; 
-            border-color: transparent transparent transparent #ffffff; /* Ekor ke Kanan */
+        /* PERUBAHAN: Hanya ikon di kiri bawah */
+        .about-button-icon-only {
+            width: 48px; /* Ukuran standar floating button */
+            height: 48px;
+            padding: 0;
+            border-radius: 9999px; /* Jadikan bulat */
         }
-        
+        .about-button-icon-only span {
+            display: none;
+        }
+
+
+        .about-button-left-side:hover {
+            background-color: #059669; /* Green 600 */
+            transform: translateY(-2px);
+        }
+
         /* C. Ikon Overlay (Tombol Floating) */
         .icon-overlay-wrapper {
             position: relative;
@@ -152,7 +171,11 @@
             justify-content: center;
             align-items: center;
             overflow: hidden;
+            border: none; 
+            border-radius: 9999px; 
+            transition: all 0.3s ease;
         }
+        
         .icon-overlay-wrapper .image-overlay {
             position: absolute;
             width: 100%;
@@ -160,9 +183,20 @@
             object-fit: cover;
             opacity: 1; 
             transition: opacity 0.3s ease;
+            border-radius: 9999px; 
         }
-        .icon-overlay-wrapper:hover .image-overlay { opacity: 1; }
 
+        /* Styling Chatbot */
+        #open-chatbot {
+            width: 48px; 
+            height: 48px;
+        }
+        #open-chatbot:hover {
+            transform: translateY(-2px);
+        }
+
+        /* HAPUS SEMUA LOGIC INSTAGRAM/BUG REPORT POPUP DARI CSS */
+        /* Hapus .bug-report-popup-wrapper, .bug-report-popup, dll. */
 
         /* Styling Notifikasi Waktu - Di Atas Kiri & Hitam Transparan */
         #floating-time-notification { 
@@ -182,50 +216,134 @@
             .chatbot-button-container { 
                 right: 32px; 
                 bottom: 32px; 
-                flex-direction: column; /* Stack di Desktop */
+                flex-direction: column; 
                 gap: 16px;
             }
-            /* Menyesuaikan posisi bubble di desktop */
-            #chat-attention-bubble { 
-                right: 120px; /* Jarak dari kanan di desktop */
-                top: 50%;
-                bottom: auto;
-                border-radius: 12px 12px 12px 0; /* Ekor ke Kanan */
+            .about-fixed-container {
+                left: 32px;
+                bottom: 32px;
             }
-            #chat-attention-bubble::after {
-                top: 50%;
-                right: -8px; 
-                bottom: auto;
-                transform: translateY(-50%);
-                border-width: 8px 0 8px 8px;
-                border-color: transparent transparent transparent #ffffff; /* Ekor ke Kanan */
+            .about-button-icon-only {
+                width: 56px; 
+                height: 56px;
             }
-            
             /* PERBAIKAN: Ukuran jam diperkecil di desktop */
             #floating-time-notification #clock-display {
                 font-size: 2rem; 
+            }
+            #open-chatbot {
+                width: 64px; 
+                height: 64px;
             }
         }
         
         /* OVERRIDE MOBILE CARD */
         @media (max-width: 639px) {
             .chatbot-button-container {
-                 flex-direction: row; /* Biarkan berdampingan di mobile */
+                 flex-direction: row; 
             }
-            #chat-attention-bubble { 
-                right: 90px; /* Didekatkan ke Chatbot button */
-                bottom: 35px; /* Sesuaikan agar sejajar tombol */
-                top: auto; /* Jangan gunakan top di mobile */
-                border-radius: 12px 12px 12px 0; /* Ekor ke Kanan */
+            .about-button-left-side {
+                padding: 0;
+                width: 48px;
+                height: 48px;
+                border-radius: 9999px;
             }
-            #chat-attention-bubble::after {
-                top: 50%;
-                right: -8px; 
-                bottom: auto;
-                transform: translateY(-50%);
-                border-width: 8px 0 8px 8px;
-                border-color: transparent transparent transparent #ffffff; /* Ekor ke Kanan */
+            .about-button-left-side span {
+                display: none;
             }
+        }
+
+        /* Styling Modal Informasi Konsultasi */
+        .info-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none; /* Default hidden */
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .info-modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 450px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            animation: fadeInScale 0.3s ease-out;
+            color: #1f2937;
+        }
+
+        @keyframes fadeInScale {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .info-modal-content h2 {
+            color: #4f46e5;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+
+        .info-modal-content p {
+            font-size: 1rem;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        
+        .info-modal-content .privacy-guarantee {
+            font-weight: normal; 
+            color: #059669; /* Green 600 */
+        }
+
+        .info-modal-content .social-link {
+             background-color: #e1306c; /* Instagram Pink */
+             margin-top: 15px;
+        }
+
+        .info-modal-content .social-link:hover {
+            background-color: #c13584;
+        }
+
+        .info-modal-content a {
+            background-color: #10b981;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9999px;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+        
+        .info-modal-content a:hover {
+            background-color: #059669;
+            transform: translateY(-2px);
+        }
+        /* Penyesuaian tombol tutup di kanan atas modal */
+        .close-info-modal {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: #9ca3af;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+        .close-info-modal:hover {
+            color: #4f46e5;
+        }
+        /* Wrapper untuk posisi relatif pada tombol tutup */
+        .info-modal-relative-wrapper {
+            position: relative;
         }
     </style>
 </head>
@@ -252,26 +370,27 @@
             <p class="text-xs text-gray-500">Sistem Kuesioner Mandiri</p>
         </div>
     </div>
+    
+    {{-- BARU: TOMBOL INFORMASI PENTING (KIRI BAWAH - HANYA ICON) --}}
+    <div class="about-fixed-container">
+        <button id="about-button-left-side"
+            class="about-button-left-side about-button-icon-only" 
+            title="Informasi Penting dan Kerahasiaan Data">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            {{-- Teks dihapus sesuai permintaan --}}
+        </button>
+    </div>
 
 
-    {{-- BUTTON CHATBOT & SOSMED (PERBAIKAN TATA LETAK MOBILE) --}}
-    <div class="chatbot-button-container" style="position: fixed; right: 24px; bottom: 24px;"> 
-        
-        {{-- Bubble hanya mengarah ke tombol Chatbot AI --}}
-        {{-- DIV DENGAN ID chat-attention-bubble DIHAPUS KARENA TIDAK ADA KONTEN DAN MERUPAKAN SUMBER PANAH PUTIH --}}
-        
-        {{-- Tombol Instagram (Ditaruh di samping kiri Chatbot di mobile) --}}
-        <a href="https://www.instagram.com/suma.liebert/" target="_blank" 
-            class="bg-pink-600 text-white w-12 h-12 rounded-full shadow-2xl hover:bg-pink-700 transition duration-300 transform hover:scale-110 icon-overlay-wrapper" 
-            title="Kunjungi Instagram">
-            <img src="{{ asset('images/ig.jpg') }}" alt="Instagram Icon" class="rounded-full image-overlay" />
-        </a>
-
-        {{-- Tombol Chatbot AI (Paling Kanan) --}}
+    {{-- BUTTON CHATBOT (KANAN BAWAH) --}}
+    <div class="chatbot-button-container"> 
+        {{-- Tombol Chatbot AI --}}
         <button id="open-chatbot" 
-            class="bg-indigo-600 text-white w-16 h-16 rounded-full shadow-2xl hover:bg-indigo-700 transition duration-300 transform hover:scale-105 icon-overlay-wrapper relative" 
+            class="bg-indigo-600 text-white rounded-full shadow-2xl hover:bg-indigo-700 transition duration-300 transform icon-overlay-wrapper relative" 
             title="Mulai Chatbot">
-            <img src="{{ asset('images/chatbot.jpg') }}" alt="Chatbot Icon" class="rounded-full image-overlay" />
+            <img src="{{ asset('images/chatbot.jpg') }}" alt="Chatbot Icon" class="image-overlay" />
         </button>
     </div>
     
@@ -339,11 +458,47 @@
             
         </div>
     </div>
-    
 
+    {{--- MODAL INFORMASI KONSULTASI (Digunakan oleh tombol Kiri Bawah) ---}}
+    <div id="info-modal" class="info-modal">
+        <div class="info-modal-content info-modal-relative-wrapper">
+            <button class="close-info-modal" id="close-info-modal">&times;</button>
+            <h2 class="text-2xl">ℹ️ Informasi Penting</h2>
+            <p>
+                Formulir kuesioner mandiri ini dirancang hanya untuk tujuan pembelajaran, penelitian, dan edukasi awal. 
+                Hasil yang didapat bersifat indikatif dan tidak dapat menggantikan diagnosis profesional.
+            </p>
+            <p class="privacy-guarantee">
+                Kami menjamin kerahasiaan data pribadi Anda.
+            </p>
+            
+            <p>
+                Jika Anda merasa membutuhkan bantuan atau ingin melakukan konsultasi lebih lanjut dengan ahli yang berpengalaman, 
+                silakan klik tombol di bawah ini:
+            </p>
+            <div class="text-center space-y-3">
+                <a href="https://puspa.jakarta.go.id/tentang-puspa-jakarta" target="_blank" title="Kunjungi Profesional">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M12 20.573V16m-4-7a4 4 0 00-4 4v2a2 2 0 002 2h8a2 2 0 002-2v-2a4 4 0 00-4-4zm4-7a4 4 0 100 8 4 4 0 000-8z"></path></svg>
+                    Konsultasi dengan Profesional
+                </a>
+                
+                {{-- TOMBOL INSTAGRAM BARU DI DALAM MODAL --}}
+                <a href="https://www.instagram.com/suma.liebert/" target="_blank" title="Laporkan Bug ke Developer" class="social-link">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2M9 16H5a2 2 0 01-2-2v-6a2 2 0 012-2h4M9 16h6m-3 3v-3m0-3h.01M20 12h-8m-8-4h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4a2 2 0 012-2z"></path>
+                    </svg>
+                    Laporkan Bug (via Instagram Developer)
+                </a>
+            </div>
+        </div>
+    </div>
+    
     <script>
         // --- Variabel Global dan DOM Access ---
         const notification = document.getElementById('floating-time-notification');
+        const infoModal = document.getElementById('info-modal');
+        const aboutButtonLeftSide = document.getElementById('about-button-left-side');
+        const closeInfoModal = document.getElementById('close-info-modal');
         
         // --- Variabel DOM Chatbot AI (Dipertahankan) ---
         const container = document.getElementById('chatbot-container');
@@ -595,6 +750,12 @@
             updateClock();
             // Dihapus pengecekan 'show' di sini, karena selalu tampil
         }
+
+        // Fungsi untuk menampilkan/menyembunyikan modal info
+        function toggleInfoModal(show) {
+            infoModal.style.display = show ? 'flex' : 'none';
+            document.body.style.overflow = show ? 'hidden' : 'auto';
+        }
         
         // --- INITIALIZATION & EVENT LISTENERS ---
         
@@ -604,14 +765,10 @@
             updateClock();
             setInterval(updateClock, 1000); 
 
-            // Logika Animasi Awan Pesan (DIHAPUS LOGIC ANIMASI)
-            // Biarkan Bubble Tetap Tampil (default style di CSS)
-            
             // 1. Listener tombol Chatbot AI (Pembuka Modal Utama)
             document.getElementById('open-chatbot').addEventListener('click', function() {
                 container.classList.remove('hidden'); // Buka modal Chatbot
                 document.body.style.overflow = 'hidden';
-                // Hapus toggleAttentionBubble(false); 
                 startChatSession(); // Mulai sesi Chatbot
             });
 
@@ -630,7 +787,23 @@
             document.getElementById('close-chatbot').addEventListener('click', function() {
                 container.classList.add('hidden');
                 document.body.style.overflow = 'auto';
-                // Hapus animateAttentionBubble();
+            });
+
+            // 5. Listener tombol Informasi Penting (Kiri Bawah)
+            aboutButtonLeftSide.addEventListener('click', function() {
+                toggleInfoModal(true);
+            });
+
+            // 6. Listener tombol Tutup Modal Info
+            closeInfoModal.addEventListener('click', function() {
+                toggleInfoModal(false);
+            });
+
+            // 7. Listener klik di luar Modal Info untuk menutup
+            infoModal.addEventListener('click', function(e) {
+                if (e.target === infoModal) {
+                    toggleInfoModal(false);
+                }
             });
         });
     </script>

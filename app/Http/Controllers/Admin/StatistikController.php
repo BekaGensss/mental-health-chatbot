@@ -19,19 +19,31 @@ class StatistikController extends Controller
 {
     public function index(Request $request)
     {
-        // 1. Ambil Filter Kelas
+        // 1. Ambil Filter Kelas dan Search Query
         $classFilter = $request->input('class_filter');
+        $searchQuery = $request->input('search_query'); 
+        
         $query = StudentData::query();
         
+        // Terapkan Filter Kelas
         if ($classFilter && $classFilter !== 'all') {
             $query->where('class_level', $classFilter);
+        }
+
+        // Terapkan Pencarian (Search Query) - HANYA BERDASARKAN NAMA DAN KELAS
+        if ($searchQuery) {
+            $query->where(function($q) use ($searchQuery) {
+                // Mencari berdasarkan nama murid ATAU kelas
+                $q->where('name', 'like', '%' . $searchQuery . '%')
+                  ->orWhere('class_level', 'like', '%' . $searchQuery . '%');
+            });
         }
 
         // 2. Ambil Data Dasar dan Kelas Aktif
         $totalMurid = $query->count();
         $allClasses = AcademicClass::where('is_active', true)->pluck('name', 'name')->prepend('Semua Kelas', 'all');
         
-        // Variabel tambahan untuk Dashboard Global
+        // Variabel tambahan untuk Dashboard Global (tidak berubah)
         $totalPengisianHariIni = StudentData::whereDate('created_at', today())->count();
         $totalPertanyaan = Question::count();
         $totalAkunAdmin = User::count();
@@ -40,41 +52,39 @@ class StatistikController extends Controller
 
         // 3. Cek jika tidak ada murid yang mengisi
         if ($totalMurid === 0) {
-            $phq9Summary = $gad7Summary = ['Minimal' => 0, 'Ringan' => 0, 'Sedang' => 0, 'Berat' => 0];
-            $kpkSummary = ['Baik' => 0, 'Perlu Perbaikan' => 0];
-            $dass21Summary = ['Normal' => 0, 'Ringan' => 0, 'Sedang' => 0, 'Berat' => 0]; 
-            $totalRiskCount = 0;
-            $avgPhq9 = $avgGad7 = $avgKpk = $avgDass21 = 0;
-            $totalPhq9 = $totalGad7 = $totalKpk = $totalDass21 = 0; 
-            $submissionsPerClass = []; 
-            
-            // Variabel real-time baru dengan nilai default nol
-            $weeklySubmissions = [0, 0, 0, 0, 0, 0, 0];
-            $weeklyLabels = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
-            
-            // Atur default agar Chart Radar muncul
-            $kpkRadarData = [0, 0, 0, 0, 0];
-            $kpkRadarLabels = ['PHQ-9 (Depresi)', 'GAD-7 (Kecemasan)', 'DASS-21 (Skor Rata)', 'KPK (Skor Rata)', 'Resiko Total'];
-
+             $phq9Summary = $gad7Summary = ['Minimal' => 0, 'Ringan' => 0, 'Sedang' => 0, 'Berat' => 0];
+             $kpkSummary = ['Baik' => 0, 'Perlu Perbaikan' => 0];
+             $dass21Summary = ['Normal' => 0, 'Ringan' => 0, 'Sedang' => 0, 'Berat' => 0]; 
+             $totalRiskCount = 0;
+             $avgPhq9 = $avgGad7 = $avgKpk = $avgDass21 = 0;
+             $totalPhq9 = $totalGad7 = $totalKpk = $totalDass21 = 0; 
+             $submissionsPerClass = []; 
+             
+             $weeklySubmissions = [0, 0, 0, 0, 0, 0, 0];
+             $weeklyLabels = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+             $kpkRadarData = [0, 0, 0, 0, 0];
+             $kpkRadarLabels = ['PHQ-9 (Depresi)', 'GAD-7 (Kecemasan)', 'DASS-21 (Skor Rata)', 'KPK (Skor Rata)', 'Resiko Total'];
+             $studentDetails = collect(); 
 
             return view('admin.hasil_jawaban', compact(
                 'totalMurid', 'allClasses', 'classFilter', 'phq9Summary', 'gad7Summary', 'kpkSummary', 'dass21Summary', 
                 'totalPengisianHariIni', 'totalPertanyaan', 'totalAkunAdmin', 'totalKelasAktif', 'totalLogAktivitas',
                 'avgPhq9', 'avgGad7', 'avgKpk', 'avgDass21', 'totalRiskCount',
-                'totalPhq9', 'totalGad7', 'totalKpk', 'totalDass21', 'submissionsPerClass',
-                // Kirim variabel real-time baru
-                'weeklySubmissions', 'weeklyLabels', 'kpkRadarData', 'kpkRadarLabels'
+                'totalPhq9', 'totalGad7', 'totalKpk', 'totalDass21', 'submissionsPerClass', 'searchQuery',
+                'weeklySubmissions', 'weeklyLabels', 'kpkRadarData', 'kpkRadarLabels', 'studentDetails'
             ));
         }
 
-        // 4. Ambil semua pertanyaan, opsi, dan data murid
-        // Mengambil juga pertanyaan KPK yang akan digunakan untuk Radar Chart
+        // 4. Ambil semua pertanyaan, opsi, dan data murid yang sudah difilter/dicari
         $questions = Question::with('options')->get()->keyBy('id');
-        $kpkQuestions = $questions->where('type', 'kpk'); // Filter hanya pertanyaan KPK
+        $kpkQuestions = $questions->where('type', 'kpk'); 
         $options = Option::all()->keyBy('id');
         
-        // Ambil data murid, termasuk 'answers'
-        $allStudentData = $query->select('answers')->get();
+        // Ambil data murid LENGKAP untuk diproses dan ditampilkan di tabel
+        $allStudentData = $query->get();
+        
+        // Inisialisasi array untuk menyimpan detail murid yang akan dikirim ke view
+        $studentDetails = collect(); 
 
         // 5. Inisialisasi Penghitung
         $phq9Summary = ['Minimal' => 0, 'Ringan' => 0, 'Sedang' => 0, 'Berat' => 0];
@@ -86,7 +96,6 @@ class StatistikController extends Controller
         $totalScorePhq9 = 0; $totalScoreGad7 = 0; $totalScoreKpk = 0; $totalScoreDass21 = 0; 
         $totalPhq9Answers = 0; $totalGad7Answers = 0; $totalKpkAnswers = 0; $totalDass21Answers = 0;
 
-        // Inisialisasi penghitung skor per dimensi KPK (tetap dipertahankan untuk jaga-jaga)
         $kpkDimTotals = [];
         $kpkDimCounts = [];
 
@@ -95,7 +104,7 @@ class StatistikController extends Controller
             $phq9Score = 0; $gad7Score = 0; $kpkScore = 0; $dass21Score = 0;
             $answeredPhq9 = false; $answeredGad7 = false; 
             $answeredKpk = false; $answeredDass21 = false;
-
+            
             $answers = is_array($studentData->answers) ? $studentData->answers : json_decode($studentData->answers, true);
             if (!$answers) continue; 
 
@@ -122,7 +131,6 @@ class StatistikController extends Controller
                             $totalScoreKpk += $score; 
                             $answeredKpk = true;
                             
-                            // Logika Real-Time KPK (Radar Chart): Akumulasi skor per dimensi (jika Question memiliki field 'dimension')
                             $dimension = $question->dimension ?? 'Lain-lain'; 
                             
                             $kpkDimTotals[$dimension] = ($kpkDimTotals[$dimension] ?? 0) + $score;
@@ -147,87 +155,86 @@ class StatistikController extends Controller
             
             // --- KLASIFIKASI & SUMMARIZATION ---
             
-            // Klasifikasi PHQ-9 (Menggunakan batas yang Anda pakai)
+            $phq9Kategori = 'Belum Mengisi';
+            $gad7Kategori = 'Belum Mengisi';
+            $kpkKategori = 'Belum Mengisi';
+            $dass21Kategori = 'Belum Mengisi';
+            
+            // Klasifikasi PHQ-9
             if ($answeredPhq9) {
-                if ($phq9Score >= 12) $phq9Summary['Berat']++;
-                else if ($phq9Score >= 9) $phq9Summary['Sedang']++;
-                else if ($phq9Score >= 6) $phq9Summary['Ringan']++;
-                else $phq9Summary['Minimal']++;
+                if ($phq9Score >= 12) { $phq9Summary['Berat']++; $phq9Kategori = 'Berat'; }
+                else if ($phq9Score >= 9) { $phq9Summary['Sedang']++; $phq9Kategori = 'Sedang'; }
+                else if ($phq9Score >= 6) { $phq9Summary['Ringan']++; $phq9Kategori = 'Ringan'; }
+                else { $phq9Summary['Minimal']++; $phq9Kategori = 'Minimal'; }
             }
 
-            // Klasifikasi GAD-7: KOREKSI UTAMA! Menggunakan batas standar (5, 10, 15)
+            // Klasifikasi GAD-7
             if ($answeredGad7) {
-                if ($gad7Score >= 15) $gad7Summary['Berat']++;       // Skor 15 - 21
-                else if ($gad7Score >= 10) $gad7Summary['Sedang']++; // Skor 10 - 14
-                else if ($gad7Score >= 5) $gad7Summary['Ringan']++;  // Skor 5 - 9 
-                else $gad7Summary['Minimal']++;                      // Skor 0 - 4
+                if ($gad7Score >= 15) { $gad7Summary['Berat']++; $gad7Kategori = 'Berat'; }
+                else if ($gad7Score >= 10) { $gad7Summary['Sedang']++; $gad7Kategori = 'Sedang'; } 
+                else if ($gad7Score >= 5) { $gad7Summary['Ringan']++; $gad7Kategori = 'Ringan'; }
+                else { $gad7Summary['Minimal']++; $gad7Kategori = 'Minimal'; }
             }
 
-            // KPK (TIDAK BERUBAH)
+            // KPK 
             if ($answeredKpk) {
                 $kpkLimit = 8;
-                if ($kpkScore > $kpkLimit) $kpkSummary['Baik']++;
-                else $kpkSummary['Perlu Perbaikan']++;
+                if ($kpkScore > $kpkLimit) { $kpkSummary['Baik']++; $kpkKategori = 'Baik'; }
+                else { $kpkSummary['Perlu Perbaikan']++; $kpkKategori = 'Perlu Perbaikan'; }
             }
 
-            // DASS-21: KOREKSI BATAS SKOR! Menggunakan batas DASS Depresi Mentah (max 21)
+            // DASS-21
             if ($answeredDass21) {
                 // Batas DASS-21 Depresi Mentah: Normal 0-4, Ringan 5-6, Sedang 7-10, Berat >=11
-                if ($dass21Score >= 11) $dass21Summary['Berat']++;    
-                else if ($dass21Score >= 7) $dass21Summary['Sedang']++; 
-                else if ($dass21Score >= 5) $dass21Summary['Ringan']++; 
-                else $dass21Summary['Normal']++;                      
+                if ($dass21Score >= 11) { $dass21Summary['Berat']++; $dass21Kategori = 'Berat'; } 
+                else if ($dass21Score >= 7) { $dass21Summary['Sedang']++; $dass21Kategori = 'Sedang'; } 
+                else if ($dass21Score >= 5) { $dass21Summary['Ringan']++; $dass21Kategori = 'Ringan'; }
+                else { $dass21Summary['Normal']++; $dass21Kategori = 'Normal'; }
             }
             
             // Hitung Risiko Tinggi (Sedang ke atas)
             if (($answeredPhq9 && $phq9Score >= 9) || ($answeredGad7 && $gad7Score >= 10)) { 
                  $totalRiskCount++;
             }
+            
+            // Tambahkan data detail murid ke koleksi untuk tabel
+            // HANYA MENGGUNAKAN 'name' (TIDAK ADA 'nis')
+            $studentDetails->push([
+                'id' => $studentData->id,
+                'name' => $studentData->name, // Menggunakan 'name'
+                'class' => $studentData->class_level,
+                'phq9_kategori' => $phq9Kategori,
+                'gad7_kategori' => $gad7Kategori,
+                'dass21_kategori' => $dass21Kategori,
+                'kpk_global' => $kpkKategori,
+            ]);
         }
         
-        // 7. Hitung Totals & Averages
-        // Mengirimkan total responden sebagai variabel terpisah untuk kalkulasi persentase di view
+        // 7. Hitung Totals & Averages (Tidak Berubah)
         $totalPhq9 = $totalPhq9Answers; 
         $totalGad7 = $totalGad7Answers;
         $totalKpk = $totalKpkAnswers; 
         $totalDass21 = $totalDass21Answers; 
 
-        // Rata-rata Skor Mentah / Total Murid yang benar-benar menjawab
         $avgPhq9 = ($totalPhq9Answers > 0) ? $totalScorePhq9 / $totalPhq9Answers : 0; 
         $avgGad7 = ($totalGad7Answers > 0) ? $totalScoreGad7 / $totalGad7Answers : 0;
         
         $avgKpk = ($totalKpkAnswers > 0) ? $totalScoreKpk / $totalKpkAnswers : 0;
         $avgDass21 = ($totalDass21Answers > 0) ? $totalScoreDass21 / $totalDass21Answers : 0;
         
-        // Data untuk Bar Chart Pengisian Per Kelas
+        // Data untuk Bar Chart Pengisian Per Kelas (Tidak Berubah)
         $submissionsPerClass = StudentData::select('class_level', DB::raw('count(*) as count'))
                                          ->groupBy('class_level')
                                          ->pluck('count', 'class_level')
                                          ->toArray();
         
-        // --- START: LOGIKA REAL-TIME BARU (Disesuaikan untuk menghindari masalah dimensi kosong) ---
-        
-        // 8. Logika Real-Time KPK (Radar Chart) - MENGGUNAKAN SKALA GLOBAL
-        // Normalisasi Skor ke Skala 0-5 (Contoh)
-        
-        // PHQ-9 (Max 27). Normalisasi: (Skor / 27) * 5
+        // 8. Logika Real-Time KPK (Radar Chart) (Tidak Berubah)
         $normPhq9 = ($avgPhq9 > 0) ? round(($avgPhq9 / 27) * 5, 2) : 0; 
-        
-        // GAD-7 (Max 21). Normalisasi: (Skor / 21) * 5
         $normGad7 = ($avgGad7 > 0) ? round(($avgGad7 / 21) * 5, 2) : 0;
-        
-        // KPK (Max asumsi 24/Jumlah item * 5 jika skala 1-5, kita pakai avgKPK / 5)
-        // Jika KPK menggunakan skor 0-4 per item (max 36), Normalisasi: (Skor / 36) * 5
-        // Karena kita tidak tahu max score KPK, kita gunakan AvgKPK. Kita asumsikan skor per item max 4.
         $normKpk = ($avgKpk > 0) ? round($avgKpk / 5, 2) : 0; 
-        
-        // DASS-21 (Depresi Max 21). Normalisasi: (Skor / 21) * 5
         $normDass21 = ($avgDass21 > 0) ? round(($avgDass21 / 21) * 5, 2) : 0;
-
-        // Total Risiko Tinggi (Max totalMurid). Normalisasi: (Risiko / Total Murid) * 5
         $normRisk = ($totalMurid > 0) ? round(($totalRiskCount / $totalMurid) * 5, 2) : 0;
         
-        // Mengirim data Skala Global sebagai sumbu Radar Chart (Max 5)
         $kpkRadarLabels = [
             'Rata-rata PHQ-9', 
             'Rata-rata GAD-7', 
@@ -236,17 +243,11 @@ class StatistikController extends Controller
             'Persentase Risiko Tinggi'
         ];
         
-        // Data diisi dengan nilai yang sudah dinormalisasi (0-5)
         $kpkRadarData = [
-            $normPhq9,
-            $normGad7,
-            $normDass21,
-            $normKpk, 
-            $normRisk
+            $normPhq9, $normGad7, $normDass21, $normKpk, $normRisk
         ];
 
-
-        // 9. Logika Real-Time Tren Pengisian Mingguan (Line Chart)
+        // 9. Logika Real-Time Tren Pengisian Mingguan (Line Chart) (Tidak Berubah)
         $weeklySubmissionsQuery = StudentData::select(
                 DB::raw('DATE(created_at) as date'),
                 DB::raw('COUNT(*) as count')
@@ -261,7 +262,6 @@ class StatistikController extends Controller
         $weeklySubmissions = [];
         $weeklyLabels = [];
         
-        // Isi data untuk 7 hari terakhir (Hari ini dan 6 hari sebelumnya)
         for ($i = 6; $i >= 0; $i--) {
             $date = Carbon::now()->subDays($i)->format('Y-m-d');
             $label = Carbon::now()->subDays($i)->isoFormat('ddd'); 
@@ -270,23 +270,20 @@ class StatistikController extends Controller
             $weeklySubmissions[] = $weeklyMap[$date] ?? 0;
         }
 
-        // --- END: LOGIKA REAL-TIME BARU ---
-        
-        // 10. Kembalikan Data ke View (TERMASUK VARIABEL REAL-TIME BARU)
+        // 10. Kembalikan Data ke View
         return view('admin.hasil_jawaban', compact(
-            'totalMurid', 'allClasses', 'classFilter', 'totalRiskCount',
+            'totalMurid', 'allClasses', 'classFilter', 'totalRiskCount', 'searchQuery',
             'totalPengisianHariIni', 'totalPertanyaan', 'totalAkunAdmin', 'totalKelasAktif', 'totalLogAktivitas',
             
             'avgPhq9', 'avgGad7', 'avgKpk', 'avgDass21',
             
-            // MENGIRIM RINGKASAN & TOTAL ANSWERS
             'phq9Summary', 'gad7Summary', 'kpkSummary', 'dass21Summary', 
             'totalPhq9', 'totalGad7', 'totalKpk', 'totalDass21',
             
             'submissionsPerClass',
             
-            // VARIABEL REAL-TIME BARU (Skala Global)
-            'weeklySubmissions', 'weeklyLabels', 'kpkRadarData', 'kpkRadarLabels'
+            'weeklySubmissions', 'weeklyLabels', 'kpkRadarData', 'kpkRadarLabels',
+            'studentDetails'
         ));
     }
     
