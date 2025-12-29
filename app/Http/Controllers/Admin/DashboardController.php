@@ -51,4 +51,20 @@ class DashboardController extends Controller
             'mockupDataLine', 'mockupLabelsLine', 'mockupDataRadar', 'mockupLabelsRadar', 'submissionsPerClass'
         ));
     }
+
+    /**
+     * --- FUNGSI BARU ---
+     * Menampilkan Laporan Hasil Analisis NLP Gemini AI.
+     * Fungsi ini untuk menangani navigasi rute admin.reports.ai
+     */
+    public function aiReports()
+    {
+        // Mengambil data murid yang memiliki hasil analisis AI (ai_analysis tidak null)
+        $students = StudentData::whereNotNull('ai_analysis')
+                                ->orderBy('created_at', 'desc')
+                                ->get();
+
+        // Memanggil View khusus laporan AI di folder admin
+        return view('admin.reports_ai', compact('students'));
+    }
 }

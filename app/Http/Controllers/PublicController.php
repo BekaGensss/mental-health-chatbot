@@ -6,7 +6,8 @@ use App\Models\Question;
 use App\Models\StudentData; 
 use App\Models\AcademicClass;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 
 class PublicController extends Controller
 {
@@ -15,14 +16,8 @@ class PublicController extends Controller
      */
     public function showForm()
     {
-        // Ambil semua pertanyaan yang sudah diurutkan, beserta opsinya (untuk JS/skoring)
         $questions = Question::with('options')->orderBy('order')->get();
-        
-        // Data Kelas (Dropdown List)
-        $classes = AcademicClass::where('is_active', true)
-                                ->orderBy('name')
-                                ->pluck('name')
-                                ->all(); 
+        $classes = AcademicClass::where('is_active', true)->orderBy('name')->pluck('name')->all(); 
 
         return view('public_form', compact('questions', 'classes'));
     }
@@ -32,202 +27,188 @@ class PublicController extends Controller
      */
     public function showScoringForm()
     {
-        // Ambil data yang dibutuhkan sama seperti showForm
         $questions = Question::with('options')->orderBy('order')->get();
-        $classes = AcademicClass::where('is_active', true)
-                                ->orderBy('name')
-                                ->pluck('name')
-                                ->all(); 
+        $classes = AcademicClass::where('is_active', true)->orderBy('name')->pluck('name')->all(); 
 
         return view('public_scoring_form', compact('questions', 'classes'));
     }
 
     /**
-     * Menangani pengiriman formulir dari murid.
-     * Logika skoring untuk PHQ9, GAD7, KPK, dan DASS21
+     * Menangani pengiriman formulir, Kalkulasi Skor, dan Integrasi Gemini AI (NLP).
      */
     public function submitForm(Request $request)
     {
-        // Mendapatkan total jumlah pertanyaan untuk validasi array 'answers'
         $questionCount = Question::count();
         
         $request->validate([
             'name' => 'required|string|max:255',
-            'class_level' => 'required|string|max:10',
-            // Memastikan jumlah jawaban sesuai dengan jumlah pertanyaan (seharusnya 25)
+            'class_level' => 'required|string|max:255',
             'answers' => 'required|array|size:' . $questionCount, 
         ]);
 
-        // Inisialisasi semua variabel skor
+        // Inisialisasi variabel skor
+        $scores = ['phq9' => 0, 'gad7' => 0, 'kpk' => 0, 'dass21' => 0];
         $totalScore = 0;
-        $phq9Score = 0;
-        $gad7Score = 0;
-        $kpkScore = 0;
-        $dass21Score = 0;
+        $contextText = []; // Konteks untuk AI
 
-        // Ambil semua pertanyaan dan opsinya
         $questions = Question::with('options')->get()->keyBy('id');
 
         foreach ($request->answers as $questionId => $optionId) {
             $question = $questions->get($questionId);
-            
-            if (!$question) {
-                continue; 
-            }
+            if (!$question) continue;
 
             $option = $question->options->where('id', $optionId)->first();
-            
             if ($option) {
-                $score = $option->score;
-                $totalScore += $score;
-
-                // Logika perhitungan skor berdasarkan TIPE pertanyaan
-                switch ($question->type) {
-                    case 'phq9':
-                        $phq9Score += $score;
-                        break;
-                    case 'gad7':
-                        $gad7Score += $score;
-                        break;
-                    case 'kpk':
-                        $kpkScore += $score;
-                        break;
-                    case 'dass21':
-                        $dass21Score += $score;
-                        break;
+                $scoreValue = (int)$option->score;
+                $totalScore += $scoreValue;
+                
+                // Pastikan tipe kategori ada di array scores
+                if (array_key_exists($question->type, $scores)) {
+                    $scores[$question->type] += $scoreValue;
+                }
+                
+                // Kumpulkan konteks jika skor menunjukkan gejala menengah-berat
+                if ($scoreValue >= 2) {
+                    $contextText[] = "Gejala: {$question->content} (Respon: {$option->text})";
                 }
             }
         }
         
-        // Analisis hasil dan dapatkan ringkasan teks
-        $resultSummary = $this->analyzeResults($phq9Score, $gad7Score, $kpkScore, $dass21Score);
+        // 1. Dapatkan Analisis Rule-based
+        $resultSummaryText = $this->analyzeResults($scores['phq9'], $scores['gad7'], $scores['kpk'], $scores['dass21']);
 
-        // --- Simpan data murid dan tangkap ID-nya ---
+        // 2. INTEGRASI NLP GEMINI AI
+        $aiResult = $this->analyzeWithGemini($scores, $contextText, $request->name);
+
+        // 3. Simpan data ke Database
         $studentData = StudentData::create([
             'name' => $request->name,
             'class_level' => $request->class_level,
             'answers' => $request->answers,
-            'result_summary' => "Total Score: $totalScore. PHQ9: $phq9Score, GAD7: $gad7Score, KPK: $kpkScore, DASS21: $dass21Score. Ringkasan: $resultSummary",
+            'scores' => $scores, // Array otomatis jadi JSON via Model Cast
+            'ai_analysis' => $aiResult['analysis'], 
+            'mental_status' => $aiResult['status'], 
+            'result_summary' => "Total: $totalScore. $resultSummaryText",
         ]);
         
-        // Kirim semua skor dan ID MURID ke halaman sukses (untuk PDF)
+        // Redirect ke sukses dengan menyertakan studentId
         return redirect()->route('form.success', [
+            'studentId' => $studentData->id,
             'totalScore' => $totalScore,
-            'phq9Score' => $phq9Score, 
-            'gad7Score' => $gad7Score, 
-            'kpkScore' => $kpkScore, 
-            'dass21Score' => $dass21Score, 
-            'summary' => $resultSummary, 
-            'studentId' => $studentData->id, // ID MURID WAJIB
+            'phq9Score' => $scores['phq9'], 
+            'gad7Score' => $scores['gad7'], 
+            'kpkScore' => $scores['kpk'], 
+            'dass21Score' => $scores['dass21'], 
+            'summary' => $resultSummaryText, 
         ]);
     }
     
     /**
-     * Helper: Logika analisis hasil berdasarkan skor (Diperbarui untuk 4 skala).
+     * Helper: Logika analisis hasil berdasarkan skor (Rule-based).
      */
     private function analyzeResults(int $phq9, int $gad7, int $kpk, int $dass21): string
     {
-        // Ambang Batas disesuaikan dengan Max Score Baru (PHQ9 Max 15, GAD7 Max 15, KPK Max 15, DASS21 Max 30)
-        
-        // 1. Logika PHQ-9 (Max Score 15)
         $phq9Result = match (true) {
-            $phq9 >= 12 => 'Depresi Berat',      // Disesuaikan dari 20
-            $phq9 >= 8 => 'Depresi Sedang-Berat', // Disesuaikan dari 15
-            $phq9 >= 5 => 'Depresi Sedang',       // Disesuaikan dari 10
-            $phq9 >= 3 => 'Depresi Ringan',       // Disesuaikan dari 5
-            default => 'Minimal Depresi',
-        };
-
-        // 2. Logika GAD-7 (Max Score 15)
-        $gad7Result = match (true) {
-            $gad7 >= 12 => 'Cemas Berat',        // Disesuaikan dari 15 (Max 21)
-            $gad7 >= 8 => 'Cemas Sedang',         // Disesuaikan dari 10
-            $gad7 >= 4 => 'Cemas Ringan',         // Disesuaikan dari 5
-            default => 'Minimal Cemas',
-        };
-        
-        // 3. Logika KPK (Max Score 15)
-        $kpkResult = $kpk > 10 ? 'Perilaku Kesehatan Baik' : 'Perlu Perbaikan Perilaku Kesehatan'; 
-        
-        // 4. Logika DASS-21 (Max Score 30)
-        $dass21Result = match (true) {
-            $dass21 >= 22 => 'Stres/Cemas/Depresi Ekstrem', // Disesuaikan dari 45
-            $dass21 >= 15 => 'Stres/Cemas/Depresi Berat',   // Disesuaikan dari 35
-            $dass21 >= 10 => 'Stres/Cemas/Depresi Sedang',  // Disesuaikan dari 25
-            $dass21 >= 5 => 'Stres/Cemas/Depresi Ringan',   // Disesuaikan dari 15
+            $phq9 >= 12 => 'Depresi Berat',
+            $phq9 >= 8 => 'Depresi Sedang',
+            $phq9 >= 4 => 'Depresi Ringan',
             default => 'Normal',
         };
 
-        return "PHQ9: $phq9Result, GAD7: $gad7Result, KPK: $kpkResult, DASS21: $dass21Result.";
+        $gad7Result = match (true) {
+            $gad7 >= 12 => 'Cemas Berat',
+            $gad7 >= 8 => 'Cemas Sedang',
+            $gad7 >= 4 => 'Cemas Ringan',
+            default => 'Normal',
+        };
+        
+        $kpkResult = $kpk > 10 ? 'Baik' : 'Perlu Perhatian'; 
+        
+        $dassResult = match (true) {
+            $dass21 >= 20 => 'Stres Tinggi',
+            $dass21 >= 10 => 'Stres Sedang',
+            default => 'Normal',
+        };
+
+        return "PHQ9: $phq9Result, GAD7: $gad7Result, KPK: $kpkResult, DASS21: $dassResult.";
     }
 
     /**
-     * Menampilkan halaman sukses setelah pengisian formulir.
+     * Fungsi Inti: Analisis NLP menggunakan Gemini AI.
+     */
+    private function analyzeWithGemini(array $scores, array $context, string $name)
+    {
+        $apiKey = env('GEMINI_API_KEY');
+        if (!$apiKey) {
+            return ['analysis' => 'Layanan AI belum dikonfigurasi.', 'status' => 'Waspada'];
+        }
+
+        $prompt = "Anda adalah Psikolog Klinis. Analisis murid $name. 
+        Skor: PHQ-9(Depresi): {$scores['phq9']}/15, GAD-7(Cemas): {$scores['gad7']}/15, DASS-21: {$scores['dass21']}/30, KPK: {$scores['kpk']}/15.
+        Detail Masalah: " . implode(". ", $context) . ".
+        Berikan tanggapan empati, saran rujukan (BK/Psikolog), dan 3 aktivitas pemulihan.
+        Balas HANYA JSON: {\"analysis\": \"teks\", \"status\": \"Aman/Waspada/Bahaya\"}";
+
+        try {
+            $response = Http::post("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey", [
+                "contents" => [["parts" => [["text" => $prompt]]]]
+            ]);
+
+            $rawText = $response->json()['candidates'][0]['content']['parts'][0]['text'];
+            $cleanJson = json_decode(trim(str_replace(['```json', '```'], '', $rawText)), true);
+            
+            return [
+                'analysis' => $cleanJson['analysis'] ?? 'Analisis AI tidak tersedia.',
+                'status' => $cleanJson['status'] ?? 'Waspada'
+            ];
+        } catch (\Exception $e) {
+            return ['analysis' => 'AI sibuk. Konsultasikan skor Anda ke Guru BK.', 'status' => 'Waspada'];
+        }
+    }
+
+    /**
+     * Menampilkan halaman sukses (Memperbaiki error nilai 0).
      */
     public function showSuccess(Request $request)
     {
-        // Ambil semua data dari query string
-        $totalScore = $request->get('totalScore');
-        $phq9Score = $request->get('phq9Score');
-        $gad7Score = $request->get('gad7Score');
-        $kpkScore = $request->get('kpkScore');
-        $dass21Score = $request->get('dass21Score');
-        $resultSummary = $request->get('summary');
-        
-        // Pengecekan dasar jika data hilang di query string
-        if (!$resultSummary || $totalScore === null) {
-            return redirect('/')->with('error', 'Gagal memuat hasil. Silakan ulangi pengisian formulir.');
-        }
-
-        // --- Klasifikasi Ulang untuk Data Diagram (Persentase) ---
-        // NILAI MAX DISINKRONKAN DENGAN SEEDER BARU (Total 75)
-        $phq9Max = 15;
-        $gad7Max = 15;
-        $kpkMax = 15;
-        $dass21Max = 30; 
-
-        // Perhitungan Persentase Risiko
-        $phq9Percent = ($phq9Score / $phq9Max) * 100;
-        $gad7Percent = ($gad7Score / $gad7Max) * 100;
-        $kpkPercent = ($kpkScore / $kpkMax) * 100;
-        $dass21Percent = ($dass21Score / $dass21Max) * 100;
-
-        // Ambil ID Murid dari URL
         $studentId = $request->get('studentId'); 
+        $studentData = StudentData::find($studentId);
 
-        // ===================================================
-        // >>> PENAMBAHAN KODE KRITIS UNTUK DATA MURID <<<
-        // ===================================================
-        $studentName = 'Data Tidak Ditemukan'; // Nilai default
-        $studentClass = 'N/A'; // Nilai default
-
-        if ($studentId) {
-            // Cari data murid di database berdasarkan ID
-            $studentData = StudentData::find($studentId);
-            
-            if ($studentData) {
-                // Jika ditemukan, ambil Nama dan Kelas
-                $studentName = $studentData->name;
-                $studentClass = $studentData->class_level;
-            }
+        if (!$studentData) {
+            return redirect('/')->with('error', 'Data tidak ditemukan.');
         }
-        // ===================================================
 
-        return view('public_success', compact(
-            'totalScore', 
-            'resultSummary', 
-            'phq9Score', 
-            'gad7Score',
-            'kpkScore',
-            'dass21Score',
-            'phq9Percent', 
-            'gad7Percent',
-            'kpkPercent',
-            'dass21Percent',
-            'studentId', // WAJIB DIKIRIM KE VIEW
-            // >>> KIRIM VARIABEL NAMA DAN KELAS KE VIEW <<<
-            'studentName', 
-            'studentClass' 
-        ));
+        // Ambil skor dari database (Model Casts harus array)
+        $dbScores = $studentData->scores;
+
+        // Ambil nilai individual (fallback ke 0 jika null)
+        $p9 = (int)($dbScores['phq9'] ?? 0);
+        $g7 = (int)($dbScores['gad7'] ?? 0);
+        $kp = (int)($dbScores['kpk'] ?? 0);
+        $d2 = (int)($dbScores['dass21'] ?? 0);
+
+        // Hitung Persentase (Max: PHQ9=15, GAD7=15, KPK=15, DASS21=30)
+        $phq9Percent = ($p9 / 15) * 100;
+        $gad7Percent = ($g7 / 15) * 100;
+        $kpkPercent = ($kp / 15) * 100;
+        $dass21Percent = ($d2 / 30) * 100;
+
+        return view('public_success', [
+            'totalScore' => array_sum($dbScores),
+            'resultSummary' => $studentData->result_summary,
+            'phq9Score' => $p9,
+            'gad7Score' => $g7,
+            'kpkScore' => $kp,
+            'dass21Score' => $d2,
+            'phq9Percent' => $phq9Percent,
+            'gad7Percent' => $gad7Percent,
+            'kpkPercent' => $kpkPercent,
+            'dass21Percent' => $dass21Percent,
+            'studentId' => $studentId,
+            'studentName' => $studentData->name,
+            'studentClass' => $studentData->class_level,
+            'aiAnalysis' => $studentData->ai_analysis,
+            'mentalStatus' => $studentData->mental_status
+        ]);
     }
 }

@@ -228,11 +228,16 @@ class StatistikController extends Controller
                                          ->pluck('count', 'class_level')
                                          ->toArray();
         
-        // 8. Logika Real-Time KPK (Radar Chart) (Tidak Berubah)
-        $normPhq9 = ($avgPhq9 > 0) ? round(($avgPhq9 / 27) * 5, 2) : 0; 
-        $normGad7 = ($avgGad7 > 0) ? round(($avgGad7 / 21) * 5, 2) : 0;
-        $normKpk = ($avgKpk > 0) ? round($avgKpk / 5, 2) : 0; 
-        $normDass21 = ($avgDass21 > 0) ? round(($avgDass21 / 21) * 5, 2) : 0;
+        // 8. Logika Real-Time KPK (Radar Chart) - DISESUAIKAN DENGAN SEEDER BARU
+// PHQ-9 (5 soal * 3) = 15
+// GAD-7 (5 soal * 3) = 15
+// DASS-21 (10 soal * 3) = 30
+// KPK (5 soal * 3) = 15
+
+        $normPhq9 = ($avgPhq9 > 0) ? round(($avgPhq9 / 15) * 5, 2) : 0; 
+        $normGad7 = ($avgGad7 > 0) ? round(($avgGad7 / 15) * 5, 2) : 0;
+        $normDass21 = ($avgDass21 > 0) ? round(($avgDass21 / 30) * 5, 2) : 0;
+        $normKpk = ($avgKpk > 0) ? round(($avgKpk / 15) * 5, 2) : 0; 
         $normRisk = ($totalMurid > 0) ? round(($totalRiskCount / $totalMurid) * 5, 2) : 0;
         
         $kpkRadarLabels = [
